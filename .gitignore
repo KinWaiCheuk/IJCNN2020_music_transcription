@@ -2,3 +2,5 @@ data
 weights
 result_dict
 Transcription
+.ipynb_checkpoints/
+__pycache__/
