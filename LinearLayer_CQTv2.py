@@ -50,7 +50,7 @@ else:
 if args.resolution:
     resolution = args.resolution
 else:
-    resolution = 1
+    resolution = 2
     
 n_bins = 84*resolution    
 bins_per_octave = 12*resolution

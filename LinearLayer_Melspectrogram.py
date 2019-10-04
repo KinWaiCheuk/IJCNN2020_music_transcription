@@ -30,6 +30,7 @@ parser.add_argument("-w", "--window_size", help="Set input audio window size", t
 parser.add_argument("-m", "--n_mels", help="Set the number of mel bins", type=int)
 parser.add_argument("--htk", help="Rather to use htk mel scale or not", type=int)
 parser.add_argument("-c", "--center", help="set whether center the window or not", type=bool)
+parser.add_argument("--n_fft", help="set n_fft, default value is 4096")
 # Since CQT only supports center=True, I think other experiments also need to set center=True
 
 args = parser.parse_args()
@@ -41,6 +42,11 @@ else:
 if torch.cuda.is_available():
     device = "cuda:0"
     torch.set_default_tensor_type('torch.cuda.FloatTensor')    
+    
+if args.n_fft:
+    n_fft = args.n_fft
+else:
+    n_fft = 4096
     
 # Network Parameters    
 if args.epochs:
@@ -264,12 +270,12 @@ print('Average Accuracy: \t{:2.2f}\nAverage Error: \t\t{:2.2f}'
 
 # Saving weights and results
 if center:
-    torch.save(model.state_dict(), './weights/'+filename+ '_e-{}_w-{}_mbins-{}_{}_center'.format(epochs, window, n_mels, htk_mode))
-    with open('./result_dict/'+filename+ '_e-{}_w-{}_mbins-{}_{}_center'.format(epochs, window, n_mels, htk_mode), 'wb') as f:
+    torch.save(model.state_dict(), './weights/'+filename+ '_e-{}_w-{}_mbins-{}_nfft-{}_{}_center'.format(epochs, window, n_mels, n_fft, htk_mode))
+    with open('./result_dict/'+filename+ '_e-{}_w-{}_mbins-{}_nfft-{}_{}_center'.format(epochs, window, n_mels, n_fft, htk_mode), 'wb') as f:
         pickle.dump(result_dict, f)
 else:
-    torch.save(model.state_dict(), './weights/'+filename+ '_e-{}_w-{}_mbins-{}_{}'.format(epochs, window, n_mels, htk_mode))
-    with open('./result_dict/'+filename+ '_e-{}_w-{}_mbins-{}_{}'.format(epochs, window, n_mels, htk_mode), 'wb') as f:
+    torch.save(model.state_dict(), './weights/'+filename+ '_e-{}_w-{}_mbins-{}_nfft-{}_{}'.format(epochs, window, n_mels, n_fft, htk_mode))
+    with open('./result_dict/'+filename+ '_e-{}_w-{}_mbins-{}_nfft-{}_{}'.format(epochs, window, n_mels, n_fft, htk_mode), 'wb') as f:
         pickle.dump(result_dict, f)   
 
 

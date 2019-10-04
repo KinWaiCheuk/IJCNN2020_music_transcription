@@ -380,6 +380,7 @@ def get_mir_accuracy(Yhat, Y_true, threshold=0.4, m=128):
     Ylist = []
     Yhatpred = Yhat>threshold
     print(f"Calculating accuracy ...", end = '\r')
+    print(' '*50, end='\r') # Clearing previous content
     for i in range(len(Yhatpred)):
         fhat = []
         f = []
