@@ -60,6 +60,7 @@ sequence = 1
 
 if args.n_fft:
     n_fft = args.n_fft
+    print("n_fft = ", n_fft)
 else:
     n_fft = 4096
 # lvl1 convolutions are shared between regions

@@ -30,7 +30,7 @@ parser.add_argument("-w", "--window_size", help="Set input audio window size", t
 parser.add_argument("-m", "--n_mels", help="Set the number of mel bins", type=int)
 parser.add_argument("--htk", help="Rather to use htk mel scale or not", type=int)
 parser.add_argument("-c", "--center", help="set whether center the window or not", type=bool)
-parser.add_argument("--n_fft", help="set n_fft, default value is 4096")
+parser.add_argument("--n_fft", help="set n_fft, default value is 4096", type=int)
 # Since CQT only supports center=True, I think other experiments also need to set center=True
 
 args = parser.parse_args()
@@ -41,12 +41,7 @@ else:
     
 if torch.cuda.is_available():
     device = "cuda:0"
-    torch.set_default_tensor_type('torch.cuda.FloatTensor')    
-    
-if args.n_fft:
-    n_fft = args.n_fft
-else:
-    n_fft = 4096
+    torch.set_default_tensor_type('torch.cuda.FloatTensor')       
     
 # Network Parameters    
 if args.epochs:
@@ -70,8 +65,11 @@ sequence = 1
 # lvl1 convolutions are shared between regions
 m = 128
 k = 512              # lvl1 nodes
-n_fft = 4096              # lvl1 receptive field
-
+if args.n_fft:
+    n_fft = args.n_fft
+else:
+    n_fft = 4096
+    
 if args.window_size:
     window = args.window_size
 else:
@@ -94,14 +92,12 @@ else:
 if args.htk:
     htk = True
     htk_mode = 'htk'
-    print(type(args.htk))
-    print(htk)
+    print("Mode = htk")
     
 else:
     htk = False
     htk_mode = 'quasi'
-    print(type(args.htk))
-    print(htk)
+    print("Mode = quasi")
 if args.n_mels:
     n_mels = args.n_mels
 else:

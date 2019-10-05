@@ -41,7 +41,7 @@ else:
     
 if torch.cuda.is_available():
     device = "cuda:0"
-    torch.set_default_tensor_type('torch.cuda.FloatTensor')    
+    torch.set_default_tensor_type('torch.cuda.FloatTensor')       
     
 # Network Parameters    
 if args.epochs:
@@ -69,7 +69,7 @@ if args.n_fft:
     n_fft = args.n_fft
 else:
     n_fft = 4096
-
+    
 if args.window_size:
     window = args.window_size
 else:
@@ -92,14 +92,12 @@ else:
 if args.htk:
     htk = True
     htk_mode = 'htk'
-    print(type(args.htk))
-    print(htk)
+    print("Mode = htk")
     
 else:
     htk = False
     htk_mode = 'quasi'
-    print(type(args.htk))
-    print(htk)
+    print("Mode = quasi")
 if args.n_mels:
     n_mels = args.n_mels
 else:
@@ -154,30 +152,17 @@ class Model(torch.nn.Module):
     def __init__(self, avg=.9998):
         super(Model, self).__init__()
         # Getting Mel Spectrogram on the fly
-        self.spec_layer = Spectrogram.MelSpectrogram(sr=fs, n_fft=n_fft, n_mels=n_mels, htk=htk, fmin=50, fmax=6000, center=center)
+        self.mel_layer = Spectrogram.MelSpectrogram(sr=fs, n_fft=n_fft, n_mels=n_mels, htk=htk, fmin=50, fmax=6000, center=center)
             
         # Creating Layers
-        self.CNN_freq_kernel_size=(128,1)
-        self.CNN_freq_kernel_stride=(2,1)
-        k_out = 128
-        k2_out = 256
+        self.linear = torch.nn.Linear(n_mels*regions, m, bias=False)
+        torch.nn.init.constant_(self.linear.weight, 0) # initialize
         
-        self.CNN_freq = nn.Conv2d(1,k_out,
-                                kernel_size=self.CNN_freq_kernel_size,stride=self.CNN_freq_kernel_stride)
-        self.CNN_time = nn.Conv2d(k_out,k2_out,
-                                kernel_size=(1,33),stride=(1,1))    
-        
-        self.region_v = 1 + (n_mels-self.CNN_freq_kernel_size[0])//self.CNN_freq_kernel_stride[0]
-        self.linear = torch.nn.Linear(k2_out*self.region_v, m, bias=False)
-
         self.avg = avg
         
     def forward(self,x):
-        z = self.spec_layer(x)
-        z = torch.log(z+epsilon)
-        z2 = torch.relu(self.CNN_freq(z.unsqueeze(1)))
-        z3 = torch.relu(self.CNN_time(z2))
-        y = self.linear(torch.relu(torch.flatten(z3,1)))
+        z = self.mel_layer(x)
+        y = self.linear((torch.log(z+epsilon)).view(x.data.size()[0],n_mels*regions))
         return torch.sigmoid(y)
     
 
@@ -281,13 +266,14 @@ print('Average Accuracy: \t{:2.2f}\nAverage Error: \t\t{:2.2f}'
 
 # Saving weights and results
 if center:
-    torch.save(model.state_dict(), './weights/'+filename+ '_e-{}_w-{}_mbins-{}_{}_center'.format(epochs, window, n_mels, htk_mode))
-    with open('./result_dict/'+filename+ '_e-{}_w-{}_mbins-{}_{}_center'.format(epochs, window, n_mels, htk_mode), 'wb') as f:
+    torch.save(model.state_dict(), './weights/'+filename+ '_e-{}_w-{}_mbins-{}_nfft-{}_{}_center_2nd'.format(epochs, window, n_mels, n_fft, htk_mode))
+    with open('./result_dict/'+filename+ '_e-{}_w-{}_mbins-{}_nfft-{}_{}_center_2nd'.format(epochs, window, n_mels, n_fft, htk_mode), 'wb') as f:
         pickle.dump(result_dict, f)
 else:
-    torch.save(model.state_dict(), './weights/'+filename+ '_e-{}_w-{}_mbins-{}_{}'.format(epochs, window, n_mels, htk_mode))
-    with open('./result_dict/'+filename+ '_e-{}_w-{}_mbins-{}_{}'.format(epochs, window, n_mels, htk_mode), 'wb') as f:
+    torch.save(model.state_dict(), './weights/'+filename+ '_e-{}_w-{}_mbins-{}_nfft-{}_{}_2nd'.format(epochs, window, n_mels, n_fft, htk_mode))
+    with open('./result_dict/'+filename+ '_e-{}_w-{}_mbins-{}_nfft-{}_{}_2nd'.format(epochs, window, n_mels, n_fft, htk_mode), 'wb') as f:
         pickle.dump(result_dict, f)   
+
 
 
 
