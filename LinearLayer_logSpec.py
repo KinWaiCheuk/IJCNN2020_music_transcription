@@ -28,6 +28,7 @@ parser.add_argument("-g", "--GPU", help="Choose which GPU to use", type=str)
 parser.add_argument("-e", "--epochs", help="Set num epochs", type=int)
 parser.add_argument("-w", "--window_size", help="Set input audio window size", type=int)
 parser.add_argument("--n_fft", help="Set the number for n_fft", type=int)
+parser.add_argument("-fb", "--freq_bins", help="Set the number for n_fft", type=int)
 
 args = parser.parse_args()
 if args.GPU:
@@ -38,7 +39,7 @@ else:
 if torch.cuda.is_available():
     device = "cuda:0"
     torch.set_default_tensor_type('torch.cuda.FloatTensor')    
-    
+
 # Network Parameters    
 if args.epochs:
     epochs = args.epochs   
@@ -63,9 +64,14 @@ if args.n_fft:
     print("n_fft = ", n_fft)
 else:
     n_fft = 4096
+    
+if args.freq_bins:
+    freq_bins = args.freq_bins
+else:
+    freq_bins = n_fft//2 + 1    
+    
 # lvl1 convolutions are shared between regions
 m = 128
-k = 512              # lvl1 nodes
 
 if args.window_size:
     window = args.window_size
@@ -128,8 +134,8 @@ class Model(torch.nn.Module):
         super(Model, self).__init__()
         # Getting Mel Spectrogram on the fly
 
-        self.STFT_layer = Spectrogram.STFT(sr=44100, n_fft=n_fft, fmin=50, fmax=6000, freq_scale='log', pad_mode='constant', center=True)
-        self.n_bins = n_fft//2 + 1
+        self.STFT_layer = Spectrogram.STFT(sr=44100, n_fft=n_fft, freq_bins=freq_bins, fmin=50, fmax=6000, freq_scale='log', pad_mode='constant', center=True)
+        self.n_bins = freq_bins
         # Creating Layers
         self.linear = torch.nn.Linear(self.n_bins*regions, m, bias=False)
         torch.nn.init.constant_(self.linear.weight, 0) # initialize
@@ -240,8 +246,8 @@ print('Average Accuracy: \t{:2.2f}\nAverage Error: \t\t{:2.2f}'
 
 # Saving weights and results
 
-torch.save(model.state_dict(), './weights/'+filename+ '_e-{}_w-{}_n_fft-{}'.format(epochs, window, n_fft))
-with open('./result_dict/LogSpec/Exp2/'+filename+ '_e-{}_w-{}_n_fft-{}'.format(epochs, window, n_fft), 'wb') as f:
+torch.save(model.state_dict(), './weights/'+filename+ '_e-{}_w-{}_n_fft-{}_fb-{}'.format(epochs, window, n_fft, freq_bins))
+with open('./result_dict/LogSpec/'+filename+ '_e-{}_w-{}_n_fft-{}_fb-{}'.format(epochs, window, n_fft, freq_bins), 'wb') as f:
     pickle.dump(result_dict, f)
 
 

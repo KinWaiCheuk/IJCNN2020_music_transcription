@@ -52,7 +52,7 @@ if args.resolution:
 else:
     resolution = 2
     
-n_bins = 84*resolution    
+n_bins = 82*resolution    
 bins_per_octave = 12*resolution
 
 train_size = 100000
@@ -246,8 +246,8 @@ print('Average Accuracy: \t{:2.2f}\nAverage Error: \t\t{:2.2f}'
 
 # Saving weights and results
 
-torch.save(model.state_dict(), './weights/'+filename+ '_e-{}_w-{}_r-{}'.format(epochs, window, resolution))
-with open('./result_dict/'+filename+ '_e-{}_w-{}_r-{}'.format(epochs, window, resolution), 'wb') as f:
+torch.save(model.state_dict(), './weights/'+filename+ '_e-{}_w-{}_r-{}_b84'.format(epochs, window, resolution))
+with open('./result_dict/'+filename+ '_e-{}_w-{}_r-{}_b84'.format(epochs, window, resolution), 'wb') as f:
     pickle.dump(result_dict, f)
 
 

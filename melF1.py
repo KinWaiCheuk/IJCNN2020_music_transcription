@@ -41,20 +41,20 @@ else:
     
 if torch.cuda.is_available():
     device = "cuda:0"
-    torch.set_default_tensor_type('torch.cuda.FloatTensor')    
+    torch.set_default_tensor_type('torch.cuda.FloatTensor')       
     
 # Network Parameters    
 if args.epochs:
     epochs = args.epochs   
 else:
-    epochs = 50
+    epochs = 35
 
 train_size = 100000
 test_size = 50000
 epsilon = 1e-5
 fs = 44100
 
-lr = 1e-4
+lr = 1e-6
 momentum = .95
 
 pitch_shift = 0
@@ -69,7 +69,7 @@ if args.n_fft:
     n_fft = args.n_fft
 else:
     n_fft = 4096
-
+    
 if args.window_size:
     window = args.window_size
 else:
@@ -92,18 +92,16 @@ else:
 if args.htk:
     htk = True
     htk_mode = 'htk'
-    print(type(args.htk))
-    print(htk)
+    print("Mode = htk")
     
 else:
     htk = False
     htk_mode = 'quasi'
-    print(type(args.htk))
-    print(htk)
+    print("Mode = quasi")
 if args.n_mels:
     n_mels = args.n_mels
 else:
-    n_mels=256
+    n_mels=1024
 
 def worker_init(args):
     signal.signal(signal.SIGINT, signal.SIG_IGN) # ignore signals so parent can handle them
@@ -145,7 +143,6 @@ train_loader = torch.utils.data.DataLoader(dataset=train_set,batch_size=batch_si
 test_loader = torch.utils.data.DataLoader(dataset=test_set,batch_size=batch_size,**kwargs)
 
 # Defining Models
-print("n_mels =", n_mels)
 
 Loss = torch.nn.BCELoss()
 def L(yhatvar,y):
@@ -155,30 +152,17 @@ class Model(torch.nn.Module):
     def __init__(self, avg=.9998):
         super(Model, self).__init__()
         # Getting Mel Spectrogram on the fly
-        self.spec_layer = Spectrogram.MelSpectrogram(sr=fs, n_fft=n_fft, n_mels=n_mels, htk=htk, fmin=50, fmax=6000, center=center)
+        self.mel_layer = Spectrogram.MelSpectrogram(sr=fs, n_fft=n_fft, n_mels=n_mels, htk=htk, fmin=50, fmax=6000, center=center)
             
         # Creating Layers
-        self.CNN_freq_kernel_size=(128,1)
-        self.CNN_freq_kernel_stride=(2,1)
-        k_out = 128
-        k2_out = 256
+        self.linear = torch.nn.Linear(n_mels*regions, m, bias=False)
+        torch.nn.init.constant_(self.linear.weight, 0) # initialize
         
-        self.CNN_freq = nn.Conv2d(1,k_out,
-                                kernel_size=self.CNN_freq_kernel_size,stride=self.CNN_freq_kernel_stride)
-        self.CNN_time = nn.Conv2d(k_out,k2_out,
-                                kernel_size=(1,regions),stride=(1,1))    
-        
-        self.region_v = 1 + (n_mels-self.CNN_freq_kernel_size[0])//self.CNN_freq_kernel_stride[0]
-        self.linear = torch.nn.Linear(k2_out*self.region_v, m, bias=False)
-
         self.avg = avg
         
     def forward(self,x):
-        z = self.spec_layer(x)
-        z = torch.log(z+epsilon)
-        z2 = torch.relu(self.CNN_freq(z.unsqueeze(1)))
-        z3 = torch.relu(self.CNN_time(z2))
-        y = self.linear(torch.relu(torch.flatten(z3,1)))
+        z = self.mel_layer(x)
+        y = self.linear((torch.log(z+epsilon)).view(x.data.size()[0],n_mels*regions))
         return torch.sigmoid(y)
     
 
@@ -268,27 +252,30 @@ ax[1].set_ylim(0.3,0.80)
 print('AvgP\tP\tR\tAcc\tETot\tESub\tEmiss\tEfa')
 Accavg = 0
 Etotavg = 0
+AvgPavg = 0
 model.eval()
 for songid in test_set.rec_ids:
     Y_pred, Y_true = musicnet.get_piano_roll(songid, test_set, model, device,
                                              window=window, m=m, stride=-1)
-    _,_,_,Acc,Etot = musicnet.get_mir_accuracy(Y_pred, Y_true, m=m)
+    AvgP,_,_,Acc,Etot = musicnet.get_mir_accuracy(Y_pred, Y_true, m=m)
     Accavg += Acc
     Etotavg += Etot
-    result_dict['Mir_Eval'].append([Acc, Etot])
+    AvgPavg += AvgP
+    result_dict['Mir_Eval'].append([Acc, Etot, AvgP])
 
-print('Average Accuracy: \t{:2.2f}\nAverage Error: \t\t{:2.2f}'
-      .format(Accavg/len(test_set.rec_ids)*100, Etotavg/len(test_set.rec_ids)*100))
-print("n_mels =", n_mels)
+print('Average Precision: \t{:2.2f}\nAverage Accuracy: \t{:2.2f}\nAverage Error: \t\t{:2.2f}'
+      .format(AvgPavg/len(test_set.rec_ids)*100, Accavg/len(test_set.rec_ids)*100, Etotavg/len(test_set.rec_ids)*100))
+
 # Saving weights and results
 if center:
-    torch.save(model.state_dict(), './weights/'+filename+ '_e-{}_w-{}_mbins-{}_{}_nfft-{}_center'.format(epochs, window, n_mels, htk_mode,n_fft))
-    with open('./result_dict/'+filename+ '_e-{}_w-{}_mbins-{}_{}_nfft-{}_center'.format(epochs, window, n_mels, htk_mode,n_fft), 'wb') as f:
+    torch.save(model.state_dict(), './weights/'+filename+ '_e-{}_w-{}_mbins-{}_nfft-{}_{}_center_2nd'.format(epochs, window, n_mels, n_fft, htk_mode))
+    with open('./result_dict/'+filename+ '_e-{}_w-{}_mbins-{}_nfft-{}_{}_center_2nd'.format(epochs, window, n_mels, n_fft, htk_mode), 'wb') as f:
         pickle.dump(result_dict, f)
 else:
-    torch.save(model.state_dict(), './weights/'+filename+ '_e-{}_w-{}_mbins-{}_{}_nfft-{}'.format(epochs, window, n_mels, n_fft,htk_mode,n_fft))
-    with open('./result_dict/'+filename+ '_e-{}_w-{}_mbins-{}_{}_nfft-{}'.format(epochs, window, n_mels, htk_mode,n_fft), 'wb') as f:
+    torch.save(model.state_dict(), './weights/'+filename+ '_e-{}_w-{}_mbins-{}_nfft-{}_{}_2nd'.format(epochs, window, n_mels, n_fft, htk_mode))
+    with open('./result_dict/'+filename+ '_e-{}_w-{}_mbins-{}_nfft-{}_{}_2nd'.format(epochs, window, n_mels, n_fft, htk_mode), 'wb') as f:
         pickle.dump(result_dict, f)   
+
 
 
 

@@ -8,7 +8,7 @@ sys.path.insert(0, '../')
 
 import musicnet
 
-from time import time
+from time import time, sleep
 
 from sklearn.metrics import average_precision_score
 
@@ -21,7 +21,6 @@ import torch.nn as nn
 
 import Spectrogram
 import argparse
-
     
 parser = argparse.ArgumentParser()
 parser.add_argument("-g", "--GPU", help="Choose which GPU to use", type=str)
@@ -29,7 +28,7 @@ parser.add_argument("-e", "--epochs", help="Set num epochs", type=int)
 parser.add_argument("-w", "--window_size", help="Set input audio window size", type=int)
 parser.add_argument("-c", "--center", help="set whether center the window or not", type=bool)
 parser.add_argument("--n_fft", help="Set the number for n_fft", type=int)
-
+parser.add_argument("-fb", "--freq_bins", help="Set the number for n_fft", type=int)
 # Since CQT only supports center=True, I think other experiments also need to set center=True
 
 args = parser.parse_args()
@@ -46,14 +45,14 @@ if torch.cuda.is_available():
 if args.epochs:
     epochs = args.epochs   
 else:
-    epochs = 35
+    epochs = 50
 
 train_size = 100000
 test_size = 50000
 epsilon = 1e-5
 fs = 44100
 
-lr = 1e-6
+lr = 1e-4
 momentum = .95
 
 pitch_shift = 0
@@ -63,13 +62,17 @@ sequence = 1
 
 # lvl1 convolutions are shared between regions
 m = 128
-k = 512              # lvl1 nodes
 if args.n_fft:
     n_fft = args.n_fft
     print("n_fft = ", n_fft)
 else:
     n_fft = 4096
 
+if args.freq_bins:
+    freq_bins = args.freq_bins
+else:
+    freq_bins = n_fft//2 + 1        
+    
 if args.window_size:
     window = args.window_size
 else:
@@ -128,8 +131,10 @@ print("Data loaded, time used = {:2.2f} seconds".format(time()-start))
 train_loader = torch.utils.data.DataLoader(dataset=train_set,batch_size=batch_size,**kwargs)
 test_loader = torch.utils.data.DataLoader(dataset=test_set,batch_size=batch_size,**kwargs)
 
-# Defining Models
+#Reserving GPU memory for eval
+Y_pred = torch.zeros([7500,128])
 
+# Defining Models
 Loss = torch.nn.BCELoss()
 def L(yhatvar,y):
     return Loss(yhatvar,y) * 128/2
@@ -138,8 +143,8 @@ class Model(torch.nn.Module):
     def __init__(self, avg=.9998):
         super(Model, self).__init__()
         # Getting Mel Spectrogram on the fly
-        self.spec_layer = Spectrogram.STFT(sr=44100, n_fft=n_fft, fmin=50, fmax=6000, freq_scale='log', pad_mode='constant', center=True)
-        self.n_bins = n_fft//2 + 1    
+        self.spec_layer = Spectrogram.STFT(sr=44100, n_fft=n_fft, freq_bins=freq_bins, fmin=50, fmax=6000, freq_scale='log', pad_mode='constant', center=True)
+        self.n_bins = freq_bins    
         # Creating Layers
         self.CNN_freq_kernel_size=(128,1)
         self.CNN_freq_kernel_stride=(2,1)
@@ -149,7 +154,7 @@ class Model(torch.nn.Module):
         self.CNN_freq = nn.Conv2d(1,k_out,
                                 kernel_size=self.CNN_freq_kernel_size,stride=self.CNN_freq_kernel_stride)
         self.CNN_time = nn.Conv2d(k_out,k2_out,
-                                kernel_size=(1,33),stride=(1,1))    
+                                kernel_size=(1,regions),stride=(1,1))    
         
         self.region_v = 1 + (self.n_bins-self.CNN_freq_kernel_size[0])//self.CNN_freq_kernel_stride[0]
         self.linear = torch.nn.Linear(k2_out*self.region_v, m, bias=False)
@@ -160,7 +165,6 @@ class Model(torch.nn.Module):
         z = self.spec_layer(x)
         z = torch.log(z+epsilon)
         z2 = torch.relu(self.CNN_freq(z.unsqueeze(1)))
-        print(z2.shape)
         z3 = torch.relu(self.CNN_time(z2))
         y = self.linear(torch.relu(torch.flatten(z3,1)))
         return torch.sigmoid(y)
@@ -168,6 +172,7 @@ class Model(torch.nn.Module):
 
 model = Model()
 model.to(device)
+
 
 optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 # optimizer = SWA(base_opt, swa_start=0, swa_freq=1, swa_lr=0.000001)
@@ -266,8 +271,8 @@ print('Average Accuracy: \t{:2.2f}\nAverage Error: \t\t{:2.2f}'
 
 # Saving weights and results
        
-torch.save(model.state_dict(), './weights/'+filename+ '_e-{}_w-{}_n_fft-{}'.format(epochs, window, n_fft))
-with open('./result_dict/LogSpec/Exp2/'+filename+ '_e-{}_w-{}_n_fft-{}'.format(epochs, window, n_fft), 'wb') as f:
+torch.save(model.state_dict(), './weights/'+filename+ '_e-{}_w-{}_n_fft-{}_fb-{}_le1e-4'.format(epochs, window, n_fft, freq_bins))
+with open('./result_dict/LogSpec/CNN/'+filename+ '_e-{}_w-{}_n_fft-{}_fb-{}_lr1e-4'.format(epochs, window, n_fft, freq_bins), 'wb') as f:
     pickle.dump(result_dict, f)
 
 

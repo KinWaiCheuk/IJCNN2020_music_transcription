@@ -398,7 +398,7 @@ def get_mir_accuracy(Yhat, Y_true, threshold=0.4, m=128):
     mir_eval.multipitch.metrics(np.arange(len(Ylist))/100.,Ylist,np.arange(len(Yhatlist))/100.,Yhatlist)
     print('{:.2f}\t{:.2f}\t{:.2f}\t{:.2f}\t{:.2f}\t{:.2f}\t{:.2f}\t{:.2f}'.format(100*avp,100*P,100*R,Acc,Etot,Esub,Emiss,Efa))
     return avp,P,R,Acc,Etot
-def get_piano_roll(rec_id, test_set, model, device, window=16384, stride=1000, offset=44100, count=7500, batch_size=500, m=128):
+def get_piano_roll(rec_id, test_set, model, device, window=16384, stride=1000, offset=44100, count=7500, batch_size=100, m=128):
     sf=4
     if stride == -1:
         stride = (test_set.records[rec_id][1] - offset - int(sf*window))/(count-1)

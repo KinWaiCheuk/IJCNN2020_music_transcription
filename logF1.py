@@ -27,11 +27,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument("-g", "--GPU", help="Choose which GPU to use", type=str)
 parser.add_argument("-e", "--epochs", help="Set num epochs", type=int)
 parser.add_argument("-w", "--window_size", help="Set input audio window size", type=int)
-parser.add_argument("-m", "--n_mels", help="Set the number of mel bins", type=int)
-parser.add_argument("--htk", help="Rather to use htk mel scale or not", type=int)
-parser.add_argument("-c", "--center", help="set whether center the window or not", type=bool)
-parser.add_argument("--n_fft", help="set n_fft, default value is 4096", type=int)
-# Since CQT only supports center=True, I think other experiments also need to set center=True
+parser.add_argument("--n_fft", help="Set the number for n_fft", type=int)
+parser.add_argument("-fb", "--freq_bins", help="Set the number for n_fft", type=int)
 
 args = parser.parse_args()
 if args.GPU:
@@ -42,19 +39,19 @@ else:
 if torch.cuda.is_available():
     device = "cuda:0"
     torch.set_default_tensor_type('torch.cuda.FloatTensor')    
-    
+
 # Network Parameters    
 if args.epochs:
     epochs = args.epochs   
 else:
-    epochs = 50
+    epochs = 35
 
 train_size = 100000
 test_size = 50000
 epsilon = 1e-5
 fs = 44100
 
-lr = 1e-4
+lr = 1e-6
 momentum = .95
 
 pitch_shift = 0
@@ -62,13 +59,19 @@ jitter = 0.
 num_workers = 10
 sequence = 1
 
-# lvl1 convolutions are shared between regions
-m = 128
-k = 512              # lvl1 nodes
 if args.n_fft:
     n_fft = args.n_fft
+    print("n_fft = ", n_fft)
 else:
     n_fft = 4096
+    
+if args.freq_bins:
+    freq_bins = args.freq_bins
+else:
+    freq_bins = n_fft//2 + 1    
+    
+# lvl1 convolutions are shared between regions
+m = 128
 
 if args.window_size:
     window = args.window_size
@@ -79,31 +82,7 @@ batch_size = 100
 
 filename = os.path.splitext(__file__)[0]
 
-if args.center:
-    center = args.center
-else:
-    center = True
-
-if center:
-    regions = 1 + (window)//stride
-else:
-    regions = 1 + (window - n_fft)//stride
-
-if args.htk:
-    htk = True
-    htk_mode = 'htk'
-    print(type(args.htk))
-    print(htk)
-    
-else:
-    htk = False
-    htk_mode = 'quasi'
-    print(type(args.htk))
-    print(htk)
-if args.n_mels:
-    n_mels = args.n_mels
-else:
-    n_mels=256
+regions = 1 + (window)//stride # Time steps calculation for Center
 
 def worker_init(args):
     signal.signal(signal.SIGINT, signal.SIG_IGN) # ignore signals so parent can handle them
@@ -145,40 +124,25 @@ train_loader = torch.utils.data.DataLoader(dataset=train_set,batch_size=batch_si
 test_loader = torch.utils.data.DataLoader(dataset=test_set,batch_size=batch_size,**kwargs)
 
 # Defining Models
-print("n_mels =", n_mels)
 
 Loss = torch.nn.BCELoss()
 def L(yhatvar,y):
     return Loss(yhatvar,y) * 128/2
 
 class Model(torch.nn.Module):
-    def __init__(self, avg=.9998):
+    def __init__(self):
         super(Model, self).__init__()
         # Getting Mel Spectrogram on the fly
-        self.spec_layer = Spectrogram.MelSpectrogram(sr=fs, n_fft=n_fft, n_mels=n_mels, htk=htk, fmin=50, fmax=6000, center=center)
-            
-        # Creating Layers
-        self.CNN_freq_kernel_size=(128,1)
-        self.CNN_freq_kernel_stride=(2,1)
-        k_out = 128
-        k2_out = 256
-        
-        self.CNN_freq = nn.Conv2d(1,k_out,
-                                kernel_size=self.CNN_freq_kernel_size,stride=self.CNN_freq_kernel_stride)
-        self.CNN_time = nn.Conv2d(k_out,k2_out,
-                                kernel_size=(1,regions),stride=(1,1))    
-        
-        self.region_v = 1 + (n_mels-self.CNN_freq_kernel_size[0])//self.CNN_freq_kernel_stride[0]
-        self.linear = torch.nn.Linear(k2_out*self.region_v, m, bias=False)
 
-        self.avg = avg
+        self.STFT_layer = Spectrogram.STFT(sr=44100, n_fft=n_fft, freq_bins=freq_bins, fmin=50, fmax=6000, freq_scale='log', pad_mode='constant', center=True)
+        self.n_bins = freq_bins
+        # Creating Layers
+        self.linear = torch.nn.Linear(self.n_bins*regions, m, bias=False)
+        torch.nn.init.constant_(self.linear.weight, 0) # initialize
         
     def forward(self,x):
-        z = self.spec_layer(x)
-        z = torch.log(z+epsilon)
-        z2 = torch.relu(self.CNN_freq(z.unsqueeze(1)))
-        z3 = torch.relu(self.CNN_time(z2))
-        y = self.linear(torch.relu(torch.flatten(z3,1)))
+        z = self.STFT_layer(x)
+        y = self.linear((torch.log(z+epsilon)).view(x.data.size()[0], self.n_bins*regions))
         return torch.sigmoid(y)
     
 
@@ -268,27 +232,23 @@ ax[1].set_ylim(0.3,0.80)
 print('AvgP\tP\tR\tAcc\tETot\tESub\tEmiss\tEfa')
 Accavg = 0
 Etotavg = 0
+AvgPavg = 0
 model.eval()
 for songid in test_set.rec_ids:
     Y_pred, Y_true = musicnet.get_piano_roll(songid, test_set, model, device,
                                              window=window, m=m, stride=-1)
-    _,_,_,Acc,Etot = musicnet.get_mir_accuracy(Y_pred, Y_true, m=m)
+    AvgP,_,_,Acc,Etot = musicnet.get_mir_accuracy(Y_pred, Y_true, m=m)
     Accavg += Acc
     Etotavg += Etot
-    result_dict['Mir_Eval'].append([Acc, Etot])
+    AvgPavg += AvgP
+    result_dict['Mir_Eval'].append([Acc, Etot, AvgP])
 
-print('Average Accuracy: \t{:2.2f}\nAverage Error: \t\t{:2.2f}'
-      .format(Accavg/len(test_set.rec_ids)*100, Etotavg/len(test_set.rec_ids)*100))
-print("n_mels =", n_mels)
+print('Average Precision: \t{:2.2f}\nAverage Accuracy: \t{:2.2f}\nAverage Error: \t\t{:2.2f}'
+      .format(AvgPavg/len(test_set.rec_ids)*100, Accavg/len(test_set.rec_ids)*100, Etotavg/len(test_set.rec_ids)*100))
+
 # Saving weights and results
-if center:
-    torch.save(model.state_dict(), './weights/'+filename+ '_e-{}_w-{}_mbins-{}_{}_nfft-{}_center'.format(epochs, window, n_mels, htk_mode,n_fft))
-    with open('./result_dict/'+filename+ '_e-{}_w-{}_mbins-{}_{}_nfft-{}_center'.format(epochs, window, n_mels, htk_mode,n_fft), 'wb') as f:
-        pickle.dump(result_dict, f)
-else:
-    torch.save(model.state_dict(), './weights/'+filename+ '_e-{}_w-{}_mbins-{}_{}_nfft-{}'.format(epochs, window, n_mels, n_fft,htk_mode,n_fft))
-    with open('./result_dict/'+filename+ '_e-{}_w-{}_mbins-{}_{}_nfft-{}'.format(epochs, window, n_mels, htk_mode,n_fft), 'wb') as f:
-        pickle.dump(result_dict, f)   
 
-
+torch.save(model.state_dict(), './weights/'+filename+ '_e-{}_w-{}_n_fft-{}_fb-{}'.format(epochs, window, n_fft, freq_bins))
+with open('./result_dict/'+filename+ '_e-{}_w-{}_n_fft-{}_fb-{}'.format(epochs, window, n_fft, freq_bins), 'wb') as f:
+    pickle.dump(result_dict, f)
 
